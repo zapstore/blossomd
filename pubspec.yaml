@@ -20,6 +20,7 @@ dependencies:
   http: ^1.1.0
   bip340: ^0.3.0
   dotenv: ^4.2.0
+  bech32: ^0.2.2
 
 dev_dependencies:
   lints: ^5.0.0

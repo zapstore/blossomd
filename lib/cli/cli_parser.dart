@@ -42,13 +42,18 @@ void printUsage(ArgParser argParser) {
   print('  whitelist <subcommand>    Manage whitelisted pubkeys');
   print('');
   print('Whitelist subcommands:');
-  print('  add <pubkey>              Add pubkey to whitelist');
-  print('  remove <pubkey>           Remove pubkey from whitelist');
+  print(
+    '  add <pubkey>              Add pubkey to whitelist (hex or npub format)',
+  );
+  print(
+    '  remove <pubkey>           Remove pubkey from whitelist (hex or npub format)',
+  );
   print('  list                      List all whitelisted pubkeys');
   print('');
   print('Authorization:');
   print('  Pubkeys in the whitelist are allowed to upload blobs');
   print('  Pubkeys not in the whitelist are denied access');
+  print('  Supports both hex format and npub (bech32) format');
   print('');
   print('Configuration:');
   print(
@@ -68,25 +73,44 @@ void printUsage(ArgParser argParser) {
   print('Examples:');
   print('  dart run bin/blossomd.dart');
   print('  dart run bin/blossomd.dart whitelist add abc123...def');
+  print('  dart run bin/blossomd.dart whitelist add npub1...');
   print('  dart run bin/blossomd.dart whitelist list');
   print('  dart run bin/blossomd.dart whitelist remove abc123...def');
+  print('  dart run bin/blossomd.dart whitelist remove npub1...');
 }
 
 void printWhitelistUsage() {
   print('Usage: dart blossomd.dart whitelist <subcommand> [arguments]');
   print('');
   print('Subcommands:');
-  print('  add <pubkey>              Add pubkey to whitelist');
-  print('  remove <pubkey>           Remove pubkey from whitelist');
+  print(
+    '  add <pubkey>              Add pubkey to whitelist (hex or npub format)',
+  );
+  print(
+    '  remove <pubkey>           Remove pubkey from whitelist (hex or npub format)',
+  );
   print('  list                      List all whitelisted pubkeys');
   print('');
   print('Authorization:');
   print('  Pubkeys in the whitelist are allowed to upload blobs');
   print('  Pubkeys not in the whitelist are denied access');
+  print('  Supports both hex format and npub (bech32) format');
+  print('');
+  print('Pubkey formats:');
+  print('  Hex:  64-character lowercase hex string');
+  print(
+    '        Example: abc123def456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef',
+  );
+  print('  Npub: bech32-encoded public key starting with npub1');
+  print(
+    '        Example: npub1xyz123abc456def789ghi012jkl345mno678pqr901stu234vwx567yza890',
+  );
   print('');
   print('Examples:');
   print('  dart run bin/blossomd.dart whitelist add abc123...def456');
+  print('  dart run bin/blossomd.dart whitelist add npub1xyz123...abc456');
   print('  dart run bin/blossomd.dart whitelist remove abc123...def456');
+  print('  dart run bin/blossomd.dart whitelist remove npub1xyz123...abc456');
   print('  dart run bin/blossomd.dart whitelist list');
 }
 
@@ -106,6 +130,7 @@ void handleWhitelistCommand(List<String> arguments, BlossomConfig config) {
         if (arguments.length != 2) {
           print('Error: add command requires pubkey argument');
           print('Usage: dart run bin/blossomd.dart whitelist add <pubkey>');
+          print('       pubkey can be 64-char hex or npub format');
           exit(1);
         }
         final pubkey = arguments[1];
@@ -116,6 +141,7 @@ void handleWhitelistCommand(List<String> arguments, BlossomConfig config) {
         if (arguments.length != 2) {
           print('Error: remove command requires pubkey argument');
           print('Usage: dart run bin/blossomd.dart whitelist remove <pubkey>');
+          print('       pubkey can be 64-char hex or npub format');
           exit(1);
         }
         final pubkey = arguments[1];

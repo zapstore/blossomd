@@ -122,36 +122,6 @@ class BlossomServer {
     print('[INFO] Stored blob: $sha256 (${data.length} bytes)');
   }
 
-  void _storeBlobMetadata(
-    String sha256,
-    String pubkey,
-    int size,
-    String? type,
-  ) {
-    final uploaded = DateTime.now().millisecondsSinceEpoch ~/ 1000;
-
-    try {
-      final stmt = db.prepare('''
-        INSERT OR REPLACE INTO blobs (sha256, pubkey, size, type, uploaded)
-        VALUES (?, ?, ?, ?, ?)
-      ''');
-      stmt.execute([sha256, pubkey, size, type, uploaded]);
-      print('[INFO] Stored blob metadata: $sha256 for $pubkey');
-    } catch (e) {
-      print('[ERROR] Failed to store blob metadata: $e');
-    }
-  }
-
-  // Helper method to read request body
-  Future<Uint8List> _readRequestBody(Request request) async {
-    final List<int> bytes = [];
-    await for (final chunk in request.read()) {
-      bytes.addAll(chunk);
-    }
-    return Uint8List.fromList(bytes);
-  }
-
-  // HTTP Handlers
   Future<Response> _handleGetBlob(Request request) async {
     final sha256 = request.params['sha256']!;
 
@@ -285,13 +255,19 @@ class BlossomServer {
     try {
       final pubkey = request.params['pubkey']!;
 
+      // Normalize pubkey to match database format
+      final normalizedPubkey = _normalizeToHex(pubkey);
+      if (normalizedPubkey == null) {
+        return Response(400, body: 'Invalid pubkey format');
+      }
+
       // Query blobs owned by this pubkey
       final stmt = db.prepare('''
         SELECT sha256, size, type, uploaded FROM blobs 
         WHERE pubkey = ? 
         ORDER BY uploaded DESC
       ''');
-      final results = stmt.select([pubkey]);
+      final results = stmt.select([normalizedPubkey]);
 
       final blobs = results.map((row) {
         final sha256 = row['sha256'] as String;
@@ -318,6 +294,44 @@ class BlossomServer {
     }
   }
 
+  // Helper method to normalize pubkey to hex format
+  String? _normalizeToHex(String pubkey) {
+    // Use the existing WhitelistManager's normalization logic
+    return whitelistManager.normalizePubkey(pubkey);
+  }
+
+  void _storeBlobMetadata(
+    String sha256,
+    String pubkey,
+    int size,
+    String? type,
+  ) {
+    final uploaded = DateTime.now().millisecondsSinceEpoch ~/ 1000;
+
+    // Normalize pubkey for consistent storage
+    final normalizedPubkey = _normalizeToHex(pubkey) ?? pubkey.toLowerCase();
+
+    try {
+      final stmt = db.prepare('''
+        INSERT OR REPLACE INTO blobs (sha256, pubkey, size, type, uploaded)
+        VALUES (?, ?, ?, ?, ?)
+      ''');
+      stmt.execute([sha256, normalizedPubkey, size, type, uploaded]);
+      print('[INFO] Stored blob metadata: $sha256 for $normalizedPubkey');
+    } catch (e) {
+      print('[ERROR] Failed to store blob metadata: $e');
+    }
+  }
+
+  // Helper method to read request body
+  Future<Uint8List> _readRequestBody(Request request) async {
+    final List<int> bytes = [];
+    await for (final chunk in request.read()) {
+      bytes.addAll(chunk);
+    }
+    return Uint8List.fromList(bytes);
+  }
+
   Future<Response> _handleDeleteBlob(Request request) async {
     try {
       final sha256 = request.params['sha256']!;
@@ -338,11 +352,13 @@ class BlossomServer {
       }
 
       // Check if user owns this blob
+      final normalizedPubkey =
+          _normalizeToHex(event.pubkey) ?? event.pubkey.toLowerCase();
       final stmt = db.prepare('''
         SELECT COUNT(*) as count FROM blobs 
         WHERE sha256 = ? AND pubkey = ?
       ''');
-      final result = stmt.select([sha256.toLowerCase(), event.pubkey]);
+      final result = stmt.select([sha256.toLowerCase(), normalizedPubkey]);
       final count = result.first['count'] as int;
 
       if (count == 0) {
@@ -361,7 +377,7 @@ class BlossomServer {
         ''');
         final otherOwnersResult = otherOwnersStmt.select([
           sha256.toLowerCase(),
-          event.pubkey,
+          normalizedPubkey,
         ]);
         final otherOwnersCount = otherOwnersResult.first['count'] as int;
 
@@ -380,9 +396,9 @@ class BlossomServer {
       final deleteStmt = db.prepare('''
         DELETE FROM blobs WHERE sha256 = ? AND pubkey = ?
       ''');
-      deleteStmt.execute([sha256.toLowerCase(), event.pubkey]);
+      deleteStmt.execute([sha256.toLowerCase(), normalizedPubkey]);
 
-      print('[INFO] Deleted blob metadata: $sha256 by ${event.pubkey}');
+      print('[INFO] Deleted blob metadata: $sha256 by $normalizedPubkey');
 
       return Response.ok('Blob deleted successfully');
     } catch (e) {

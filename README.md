@@ -6,9 +6,10 @@ A Dart implementation of a Blossom server following the [Blossom specification](
 
 - **SHA-256 Content Addressing**: All blobs are stored and accessed using their SHA-256 hash
 - **Nostr Authentication**: Upload and delete operations require valid Nostr event signatures
-- **Whitelist System**: Access control based on public key whitelisting
+- **Whitelist System**: Access control based on public key whitelisting (supports both hex and npub formats)
+- **Blob Ownership**: Track and list blobs owned by each pubkey with the `/list/<pubkey>` endpoint
 - **RESTful HTTP API**: Standard HTTP endpoints for blob storage and retrieval
-- **SQLite Database**: Persistent storage for whitelist and metadata
+- **SQLite Database**: Persistent storage for whitelist and blob ownership metadata
 - **File Size Limits**: Configurable upload size limits (default: 600MB)
 - **CLI Management**: Command-line tools for managing whitelisted pubkeys
 
@@ -107,7 +108,15 @@ dart run bin/blossomd.dart whitelist remove <pubkey>
 
 #### Pubkey Format
 
-Pubkeys must be exactly 64 characters long and contain only hexadecimal characters (0-9, a-f, A-F).
+Pubkeys can be provided in two formats:
+
+**Hex Format:** 64-character hexadecimal string (0-9, a-f, A-F)
+- Example: `1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef`
+
+**Npub Format:** Bech32-encoded public key starting with `npub1`
+- Example: `npub1zg69v7ys40x77y352eufp27daufrg4ncjz4ummcjx3t83y9tehhsqepuh0`
+
+Both formats are accepted for add/remove operations and are interchangeable. The system stores pubkeys internally in hex format for consistency.
 
 ### Command Line Options
 
@@ -142,6 +151,26 @@ Content-Type: application/octet-stream
 ### List User Blobs
 ```http
 GET /list/<pubkey>
+```
+
+Returns a JSON array of all blobs owned by the specified pubkey. The pubkey can be provided in either hex format (64-character hex string) or npub format (bech32-encoded). Each blob entry includes:
+- `sha256`: The SHA-256 hash of the blob
+- `size`: File size in bytes
+- `type`: MIME type (if provided during upload)
+- `uploaded`: Unix timestamp of upload time
+- `url`: Full URL to access the blob
+
+Example response:
+```json
+[
+  {
+    "sha256": "abcd1234...",
+    "size": 12345,
+    "type": "image/jpeg",
+    "uploaded": 1704067200,
+    "url": "https://example.com/abcd1234..."
+  }
+]
 ```
 
 ### Delete Blob
@@ -259,17 +288,20 @@ SERVER_URL=https://blossom.example.com
 
 ### Whitelist Management Examples
 ```bash
-# Add a user to whitelist
+# Add a user to whitelist using hex format
 dart run bin/blossomd.dart whitelist add abc123def456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef
 
-# Add another user
-dart run bin/blossomd.dart whitelist add def456abc789012cdef456abc789012cdef456abc789012cdef456abc789012cdef
+# Add another user using npub format
+dart run bin/blossomd.dart whitelist add npub1zg69v7ys40x77y352eufp27daufrg4ncjz4ummcjx3t83y9tehhsqepuh0
 
-# List all users
+# List all users (shows both hex and npub formats)
 dart run bin/blossomd.dart whitelist list
 
-# Remove user
-dart run bin/blossomd.dart whitelist remove def456abc789012cdef456abc789012cdef456abc789012cdef456abc789012cdef
+# Remove user using hex format
+dart run bin/blossomd.dart whitelist remove abc123def456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef
+
+# Remove user using npub format
+dart run bin/blossomd.dart whitelist remove npub1zg69v7ys40x77y352eufp27daufrg4ncjz4ummcjx3t83y9tehhsqepuh0
 ```
 
 ## Security Considerations
@@ -293,10 +325,9 @@ dart run bin/blossomd.dart whitelist remove def456abc789012cdef456abc789012cdef4
 
 ## Limitations
 
-1. **Blob Ownership**: The `/list/<pubkey>` endpoint returns empty results (not yet implemented)
-2. **Metrics**: No built-in metrics or monitoring endpoints
-3. **Clustering**: Single-instance deployment only
-4. **Rate Limiting**: No built-in rate limiting (should be added for production)
+1. **Metrics**: No built-in metrics or monitoring endpoints
+2. **Clustering**: Single-instance deployment only
+3. **Rate Limiting**: No built-in rate limiting (should be added for production)
 
 ## Development
 

@@ -132,7 +132,7 @@ void main() {
 
       print('✅ HEAD request successful');
 
-      // Step 4: List files (currently returns empty, but test the endpoint)
+      // Step 4: List files (should now return the uploaded blob)
       print('Step 4: Testing list endpoint...');
 
       final listResponse = await http.get(
@@ -140,10 +140,16 @@ void main() {
       );
       expect(listResponse.statusCode, 200);
       final listResult = jsonDecode(listResponse.body) as List;
-      // Currently returns empty list, but endpoint should work
-      expect(listResult, isA<List>());
 
-      print('✅ List endpoint working');
+      // Now the list should contain the uploaded blob
+      expect(listResult.length, 1);
+
+      final blob = listResult[0];
+      expect(blob['sha256'], testHash);
+      expect(blob['size'], testContent.length);
+      expect(blob['url'], '$baseUrl/$testHash');
+
+      print('✅ List endpoint working - found ${listResult.length} blob(s)');
 
       // Step 5: Delete the file
       print('Step 5: Deleting file...');
@@ -184,6 +190,21 @@ void main() {
       expect(getAfterDeleteResponse.statusCode, 404);
 
       print('✅ File successfully deleted - returns 404');
+
+      // Step 7: Verify list is empty after deletion
+      print('Step 7: Verifying list is empty after deletion...');
+
+      final listAfterDeleteResponse = await http.get(
+        Uri.parse('$baseUrl/list/$testPublicKey'),
+      );
+      expect(listAfterDeleteResponse.statusCode, 200);
+      final listAfterDeleteResult =
+          jsonDecode(listAfterDeleteResponse.body) as List;
+      expect(listAfterDeleteResult.length, 0);
+
+      print(
+        '✅ List endpoint empty after deletion - found ${listAfterDeleteResult.length} blob(s)',
+      );
 
       print('🎉 Complete roundtrip test passed!');
     });
