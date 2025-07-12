@@ -237,15 +237,13 @@ DELETE FROM whitelist WHERE pubkey = 'pubkey_hex';
 
 ## File Storage
 
-Blobs are stored in a hierarchical directory structure:
+Blobs are stored in a flat directory structure:
 ```
 data/
 ├── database.sqlite
 └── blobs/
-    ├── ab/
-    │   └── abcd1234...
-    ├── cd/
-    │   └── cdef5678...
+    ├── abcd1234...
+    ├── cdef5678...
     └── ...
 ```
 

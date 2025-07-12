@@ -86,9 +86,7 @@ void main() {
       final testHash = sha256.convert(testContent).toString();
 
       // Create the blob storage directory structure
-      final blobDir = Directory(
-        '$testWorkingDir/blobs/${testHash.substring(0, 2)}',
-      );
+      final blobDir = Directory('$testWorkingDir/blobs');
       blobDir.createSync(recursive: true);
 
       // Store file directly
@@ -196,9 +194,7 @@ void main() {
       expect(isWhitelisted, true);
 
       // 4. Store blob (simulate storage)
-      final blobDir = Directory(
-        '$testWorkingDir/blobs/${testHash.substring(0, 2)}',
-      );
+      final blobDir = Directory('$testWorkingDir/blobs');
       blobDir.createSync(recursive: true);
       final filePath = '${blobDir.path}/$testHash';
       File(filePath).writeAsBytesSync(testContent);

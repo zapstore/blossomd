@@ -1,6 +1,5 @@
 import 'package:sqlite3/sqlite3.dart';
 import 'package:bech32/bech32.dart';
-import 'dart:typed_data';
 
 class WhitelistManager {
   final Database db;

@@ -106,8 +106,7 @@ class BlossomServer {
 
   // File operations
   String _getBlobPath(String sha256) {
-    final prefix = sha256.substring(0, 2);
-    final blobsDir = path.join(config.workingDir, 'blobs', prefix);
+    final blobsDir = path.join(config.workingDir, 'blobs');
     return path.join(blobsDir, sha256);
   }
 
