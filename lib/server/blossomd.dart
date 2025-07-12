@@ -35,8 +35,10 @@ class BlossomServer {
     router = Router();
 
     // Core blob endpoints
-    router.get('/<sha256>', _handleGetBlob);
-    router.head('/<sha256>', _handleHeadBlob);
+    router.get('/<sha256|[a-fA-F0-9]{64}>', _handleGetBlob);
+    router.get('/<sha256|[a-fA-F0-9]{64}>.<ext>', _handleGetBlobWithExt);
+    router.head('/<sha256|[a-fA-F0-9]{64}>', _handleHeadBlob);
+    router.head('/<sha256|[a-fA-F0-9]{64}>.<ext>', _handleHeadBlobWithExt);
 
     // Upload endpoints
     router.put('/upload', _handleUpload);
@@ -121,11 +123,10 @@ class BlossomServer {
     print('[INFO] Stored blob: $sha256 (${data.length} bytes)');
   }
 
-  Future<Response> _handleGetBlob(Request request) async {
-    final sha256 = request.params['sha256']!;
-
+  // Unified blob response logic
+  Future<Response> _serveBlob(String sha256, {bool headOnly = false}) async {
     // Validate SHA-256 format
-    if (!RegExp(r'^[a-fA-F0-9]{64}$').hasMatch(sha256)) {
+    if (!RegExp(r'^[a-fA-F0-9]{64}').hasMatch(sha256)) {
       return Response.notFound('Invalid hash format');
     }
 
@@ -136,39 +137,65 @@ class BlossomServer {
       return Response.notFound('Blob not found');
     }
 
-    final data = file.readAsBytesSync();
-    return Response.ok(
-      data,
-      headers: {
-        'content-type': 'application/octet-stream',
-        'content-length': data.length.toString(),
-      },
-    );
+    // Query content-type from database
+    String? contentType = 'application/octet-stream';
+    try {
+      final stmt = db.prepare(
+        'SELECT type FROM blobs WHERE sha256 = ? LIMIT 1',
+      );
+      final result = stmt.select([sha256.toLowerCase()]);
+      if (result.isNotEmpty && result.first['type'] != null) {
+        contentType = result.first['type'] as String;
+      }
+    } catch (e) {
+      print('[ERROR] Failed to query blob type: $e');
+    }
+    final safeContentType = contentType ?? 'application/octet-stream';
+
+    if (headOnly) {
+      final size = file.lengthSync();
+      return Response.ok(
+        null,
+        headers: {
+          'content-type': safeContentType,
+          'content-length': size.toString(),
+        },
+      );
+    } else {
+      final data = file.readAsBytesSync();
+      return Response.ok(
+        data,
+        headers: {
+          'content-type': safeContentType,
+          'content-length': data.length.toString(),
+        },
+      );
+    }
   }
 
+  // Handler for /<sha256>
+  Future<Response> _handleGetBlob(Request request) async {
+    final sha256 = request.params['sha256']!;
+    return _serveBlob(sha256, headOnly: false);
+  }
+
+  // Handler for /<sha256>.<ext>
+  Future<Response> _handleGetBlobWithExt(Request request) async {
+    final sha256 = request.params['sha256']!;
+    // Extension is ignored for lookup, but could be used for logging if desired
+    return _serveBlob(sha256, headOnly: false);
+  }
+
+  // Handler for HEAD /<sha256>
   Future<Response> _handleHeadBlob(Request request) async {
     final sha256 = request.params['sha256']!;
+    return _serveBlob(sha256, headOnly: true);
+  }
 
-    // Validate SHA-256 format
-    if (!RegExp(r'^[a-fA-F0-9]{64}$').hasMatch(sha256)) {
-      return Response.notFound('Invalid hash format');
-    }
-
-    final filePath = _getBlobPath(sha256.toLowerCase());
-    final file = File(filePath);
-
-    if (!file.existsSync()) {
-      return Response.notFound('Blob not found');
-    }
-
-    final size = file.lengthSync();
-    return Response.ok(
-      null,
-      headers: {
-        'content-type': 'application/octet-stream',
-        'content-length': size.toString(),
-      },
-    );
+  // Handler for HEAD /<sha256>.<ext>
+  Future<Response> _handleHeadBlobWithExt(Request request) async {
+    final sha256 = request.params['sha256']!;
+    return _serveBlob(sha256, headOnly: true);
   }
 
   Future<Response> _handleUpload(Request request) async {
