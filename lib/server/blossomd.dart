@@ -5,7 +5,8 @@ import 'package:shelf/shelf.dart';
 import 'package:shelf/shelf_io.dart' as shelf_io;
 import 'package:shelf_router/shelf_router.dart';
 import 'package:sqlite3/sqlite3.dart';
-import 'package:crypto/crypto.dart';
+import 'package:crypto/crypto.dart' as crypto;
+// DigestSink is available from 'package:crypto/crypto.dart'
 import 'package:path/path.dart' as path;
 import 'package:bip340/bip340.dart' as bip340;
 
@@ -14,6 +15,18 @@ import '../models/nostr_event.dart';
 import '../models/blob_descriptor.dart';
 import '../services/database_service.dart';
 import '../services/whitelist_manager.dart';
+
+// Local DigestSink implementation if not available from crypto package
+class DigestSink implements Sink<crypto.Digest> {
+  late crypto.Digest value;
+  @override
+  void add(crypto.Digest data) {
+    value = data;
+  }
+
+  @override
+  void close() {}
+}
 
 class BlossomServer {
   final BlossomConfig config;
@@ -198,6 +211,39 @@ class BlossomServer {
     return _serveBlob(sha256, headOnly: true);
   }
 
+  // Helper to stream upload to disk and calculate hash as we go
+  Future<(String tempPath, int size, crypto.Digest hash)>
+  _streamUploadToDiskAndHash(Request request) async {
+    // Prepare temp file in blobs dir
+    final blobsDir = path.join(config.workingDir, 'blobs');
+    Directory(blobsDir).createSync(recursive: true);
+    final tempFile = File(
+      path.join(
+        blobsDir,
+        '.upload_${DateTime.now().microsecondsSinceEpoch}_${pid}',
+      ),
+    );
+    final sink = tempFile.openWrite();
+
+    final digestSink = DigestSink();
+    final hasher = crypto.sha256.startChunkedConversion(digestSink);
+    int total = 0;
+    await for (final chunk in request.read()) {
+      total += chunk.length;
+      if (total > maxUploadSize) {
+        await sink.close();
+        await tempFile.delete();
+        throw Exception('blocked: max upload limit is 600MB');
+      }
+      sink.add(chunk);
+      hasher.add(chunk);
+    }
+    await sink.close();
+    hasher.close();
+    final digest = digestSink.value;
+    return (tempFile.path, total, digest);
+  }
+
   Future<Response> _handleUpload(Request request) async {
     try {
       // Extract and verify Nostr authentication
@@ -215,19 +261,26 @@ class BlossomServer {
         return Response.forbidden('blocked: you are not whitelisted');
       }
 
-      // Read file data
-      final fileData = await _readRequestBody(request);
-
-      // Check file size limit
-      if (fileData.length > maxUploadSize) {
-        return Response(400, body: 'blocked: max upload limit is 600MB');
+      // Stream upload to disk and hash as we go
+      String tempPath;
+      int fileSize;
+      crypto.Digest digest;
+      try {
+        (tempPath, fileSize, digest) = await _streamUploadToDiskAndHash(
+          request,
+        );
+      } catch (e) {
+        return Response(400, body: e.toString());
       }
 
-      // Calculate and verify SHA-256
-      final calculatedHash = sha256.convert(fileData).toString();
+      final calculatedHash = digest.toString();
       final expectedHash = event.getTagValue('x');
 
       if (calculatedHash != expectedHash) {
+        // Delete temp file
+        try {
+          await File(tempPath).delete();
+        } catch (_) {}
         return Response(
           400,
           body:
@@ -235,26 +288,34 @@ class BlossomServer {
         );
       }
 
-      // Store the file
-      _storeBlobFile(calculatedHash, fileData);
+      // Move temp file to final location
+      final finalPath = _getBlobPath(calculatedHash);
+      final finalFile = File(finalPath);
+      if (!finalFile.existsSync()) {
+        await File(tempPath).rename(finalPath);
+      } else {
+        // If file already exists, just delete temp
+        await File(tempPath).delete();
+      }
+
       _storeBlobMetadata(
         calculatedHash,
         event.pubkey,
-        fileData.length,
+        fileSize,
         event.getTagValue('m'),
       );
 
       // Create blob descriptor response
       final descriptor = BlobDescriptor(
         sha256: calculatedHash,
-        size: fileData.length,
+        size: fileSize,
         type: event.getTagValue('m'),
         uploaded: DateTime.now().millisecondsSinceEpoch ~/ 1000,
         url: '${config.serverUrl}/$calculatedHash',
       );
 
       print(
-        '[INFO] Upload successful: ${event.pubkey} uploaded $calculatedHash (${fileData.length} bytes)',
+        '[INFO] Upload successful:  [32m${event.pubkey} [0m uploaded $calculatedHash (${fileSize} bytes)',
       );
 
       return Response.ok(
