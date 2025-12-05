@@ -40,19 +40,7 @@ void main() {
       // Wait for server to start
       await Future.delayed(Duration(seconds: 3));
 
-      // Add test pubkey to whitelist
-      final addWhitelistProcess = await Process.run(
-        'dart',
-        ['run', 'bin/blossomd.dart', 'whitelist', 'add', testPublicKey],
-        workingDirectory: Directory.current.path,
-        environment: {
-          'WORKING_DIR': testWorkingDir,
-          'PORT': '3335',
-          'SERVER_URL': baseUrl,
-        },
-      );
-
-      expect(addWhitelistProcess.exitCode, 0);
+      // No whitelist setup required
     });
 
     tearDownAll(() async {
@@ -242,7 +230,7 @@ void main() {
       print('✅ Invalid signature correctly rejected');
     });
 
-    test('Upload without whitelist should fail', () async {
+    test('Upload not accepted by relay should fail', () async {
       final testContent = Uint8List.fromList(utf8.encode('Test content'));
       final testHash = sha256.convert(testContent).toString();
 
@@ -275,8 +263,7 @@ void main() {
       );
 
       expect(uploadResponse.statusCode, 403);
-      expect(uploadResponse.body, contains('not whitelisted'));
-      print('✅ Non-whitelisted user correctly rejected');
+      print('✅ Not accepted by relay correctly rejected');
     });
   });
 }

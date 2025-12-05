@@ -32,11 +32,7 @@ void main() {
       // Create server instance
       server = BlossomServer(config);
 
-      // Add test pubkey to whitelist using SQL directly
-      final stmt = server.db.prepare(
-        'INSERT OR REPLACE INTO whitelist (pubkey) VALUES (?)',
-      );
-      stmt.execute([testPublicKey]);
+      // No whitelist setup needed; external authorization is used in integration tests
 
       print('✅ Test setup complete');
     });
@@ -102,23 +98,7 @@ void main() {
       print('✅ File storage and retrieval successful');
     });
 
-    test('Whitelist authorization', () async {
-      // Test whitelist functionality
-      final isWhitelisted = server.whitelistManager.isWhitelisted(
-        testPublicKey,
-      );
-      expect(isWhitelisted, true);
-
-      // Test non-whitelisted user
-      const String nonWhitelistedPubkey =
-          'abcdef1234567890abcdef1234567890abcdef1234567890abcdef1234567890';
-      final nonWhitelisted = server.whitelistManager.isWhitelisted(
-        nonWhitelistedPubkey,
-      );
-      expect(nonWhitelisted, false);
-
-      print('✅ Whitelist authorization working correctly');
-    });
+    // Whitelist authorization test removed
 
     test('Nostr event validation', () async {
       // Test valid event
@@ -187,11 +167,7 @@ void main() {
       final nostrEvent = NostrEvent.fromJson(event);
       expect(server.verifyNostrEvent(nostrEvent), true);
 
-      // 3. Check user authorization
-      final isWhitelisted = server.whitelistManager.isWhitelisted(
-        testPublicKey,
-      );
-      expect(isWhitelisted, true);
+      // 3. External authorization is used in HTTP flow; not applicable here
 
       // 4. Store blob (simulate storage)
       final blobDir = Directory('$testWorkingDir/blobs');

@@ -9,12 +9,13 @@ import 'package:crypto/crypto.dart' as crypto;
 // DigestSink is available from 'package:crypto/crypto.dart'
 import 'package:path/path.dart' as path;
 import 'package:bip340/bip340.dart' as bip340;
+import 'package:http/http.dart' as http;
 
 import '../config/blossom_config.dart';
 import '../models/nostr_event.dart';
 import '../models/blob_descriptor.dart';
 import '../services/database_service.dart';
-import '../services/whitelist_manager.dart';
+import '../services/pubkey_utils.dart';
 
 // Local DigestSink implementation if not available from crypto package
 class DigestSink implements Sink<crypto.Digest> {
@@ -32,7 +33,7 @@ class BlossomServer {
   final BlossomConfig config;
   late final Database db;
   late final Router router;
-  late final WhitelistManager whitelistManager;
+  // Utilities
 
   BlossomServer(this.config) {
     _initializeDatabase();
@@ -41,7 +42,6 @@ class BlossomServer {
 
   void _initializeDatabase() {
     db = DatabaseService.initialize(config);
-    whitelistManager = WhitelistManager(db);
   }
 
   void _setupRoutes() {
@@ -119,22 +119,48 @@ class BlossomServer {
     }
   }
 
+  // External authorization via Zapstore relay
+  Future<bool> _isAcceptedByRelay(String pubkey) async {
+    try {
+      // Ensure npub format for the API
+      String npub;
+      if (pubkey.startsWith('npub1')) {
+        npub = pubkey;
+      } else {
+        final normalizedHex = PubkeyUtils.normalizePubkey(pubkey);
+        if (normalizedHex == null) {
+          return false;
+        }
+        npub = PubkeyUtils.hexToNpub(normalizedHex);
+      }
+
+      final uri = Uri.parse(
+        'https://relay.zapstore.dev/api/v1/accept',
+      ).replace(queryParameters: {'pubkey': npub});
+      final resp = await http.get(uri);
+      if (resp.statusCode != 200) {
+        print('[WARNING] Relay accept check failed (${resp.statusCode})');
+        return false;
+      }
+      final body = jsonDecode(resp.body) as Map<String, dynamic>;
+      final accept = body['accept'] == true;
+      if (!accept) {
+        print('[INFO] Relay rejected pubkey: $npub');
+      }
+      return accept;
+    } catch (e) {
+      print('[ERROR] Relay accept check error: $e');
+      return false;
+    }
+  }
+
   // File operations
   String _getBlobPath(String sha256) {
     final blobsDir = path.join(config.workingDir, 'blobs');
     return path.join(blobsDir, sha256);
   }
 
-  void _storeBlobFile(String sha256, Uint8List data) {
-    final filePath = _getBlobPath(sha256);
-    final dir = Directory(path.dirname(filePath));
-    dir.createSync(recursive: true);
-
-    final file = File(filePath);
-    file.writeAsBytesSync(data);
-
-    print('[INFO] Stored blob: $sha256 (${data.length} bytes)');
-  }
+  // removed unused _storeBlobFile
 
   // Unified blob response logic
   Future<Response> _serveBlob(String sha256, {bool headOnly = false}) async {
@@ -220,7 +246,7 @@ class BlossomServer {
     final tempFile = File(
       path.join(
         blobsDir,
-        '.upload_${DateTime.now().microsecondsSinceEpoch}_${pid}',
+        '.upload_${DateTime.now().microsecondsSinceEpoch}_$pid',
       ),
     );
     final sink = tempFile.openWrite();
@@ -256,9 +282,9 @@ class BlossomServer {
         return Response.forbidden('Invalid Nostr event or signature');
       }
 
-      // Check whitelist authorization
-      if (!whitelistManager.isWhitelisted(event.pubkey)) {
-        return Response.forbidden('blocked: you are not whitelisted');
+      // External authorization check
+      if (!(await _isAcceptedByRelay(event.pubkey))) {
+        return Response.forbidden('blocked: not accepted by relay');
       }
 
       // Stream upload to disk and hash as we go
@@ -315,7 +341,7 @@ class BlossomServer {
       );
 
       print(
-        '[INFO] Upload successful:  [32m${event.pubkey} [0m uploaded $calculatedHash (${fileSize} bytes)',
+        '[INFO] Upload successful: ${event.pubkey} uploaded $calculatedHash ($fileSize bytes)',
       );
 
       return Response.ok(
@@ -384,7 +410,7 @@ class BlossomServer {
   // Helper method to normalize pubkey to hex format
   String? _normalizeToHex(String pubkey) {
     // Use the existing WhitelistManager's normalization logic
-    return whitelistManager.normalizePubkey(pubkey);
+    return PubkeyUtils.normalizePubkey(pubkey);
   }
 
   void _storeBlobMetadata(
@@ -410,14 +436,7 @@ class BlossomServer {
     }
   }
 
-  // Helper method to read request body
-  Future<Uint8List> _readRequestBody(Request request) async {
-    final List<int> bytes = [];
-    await for (final chunk in request.read()) {
-      bytes.addAll(chunk);
-    }
-    return Uint8List.fromList(bytes);
-  }
+  // removed unused _readRequestBody
 
   Future<Response> _handleDeleteBlob(Request request) async {
     try {
@@ -433,9 +452,9 @@ class BlossomServer {
         return Response.forbidden('Invalid Nostr event or signature');
       }
 
-      // Check whitelist authorization
-      if (!whitelistManager.isWhitelisted(event.pubkey)) {
-        return Response.forbidden('blocked: you are not whitelisted');
+      // External authorization check
+      if (!(await _isAcceptedByRelay(event.pubkey))) {
+        return Response.forbidden('blocked: not accepted by relay');
       }
 
       // Check if user owns this blob

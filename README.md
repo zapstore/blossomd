@@ -6,12 +6,12 @@ A Dart implementation of a Blossom server following the [Blossom specification](
 
 - **SHA-256 Content Addressing**: All blobs are stored and accessed using their SHA-256 hash
 - **Nostr Authentication**: Upload and delete operations require valid Nostr event signatures
-- **Whitelist System**: Access control based on public key whitelisting (supports both hex and npub formats)
+- **External Authorization**: Upload/Delete access via Zapstore relay check (`/api/v1/accept?pubkey=<npub>`)
 - **Blob Ownership**: Track and list blobs owned by each pubkey with the `/list/<pubkey>` endpoint
 - **RESTful HTTP API**: Standard HTTP endpoints for blob storage and retrieval
-- **SQLite Database**: Persistent storage for whitelist and blob ownership metadata
+- **SQLite Database**: Persistent storage for blob ownership metadata
 - **File Size Limits**: Configurable upload size limits (default: 600MB)
-- **CLI Management**: Command-line tools for managing whitelisted pubkeys
+- **Authorization**: Controlled by external relay; no local whitelist management
 
 ## Installation
 
@@ -82,41 +82,13 @@ dart run bin/blossomd.dart
 WORKING_DIR=/var/blossom PORT=8080 dart run bin/blossomd.dart
 ```
 
-### CLI Whitelist Management
+### Authorization
 
-The server includes built-in CLI commands for managing whitelisted pubkeys:
+Upload/Delete are allowed only if the external relay returns `{ "accept": true }` for the caller's npub:
 
-#### Add a pubkey to whitelist
-```bash
-dart run bin/blossomd.dart whitelist add <pubkey>
+```text
+GET https://relay.zapstore.dev/api/v1/accept?pubkey=<npub>
 ```
-
-Example:
-```bash
-dart run bin/blossomd.dart whitelist add 1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef
-```
-
-#### List all whitelisted pubkeys
-```bash
-dart run bin/blossomd.dart whitelist list
-```
-
-#### Remove a pubkey from whitelist
-```bash
-dart run bin/blossomd.dart whitelist remove <pubkey>
-```
-
-#### Pubkey Format
-
-Pubkeys can be provided in two formats:
-
-**Hex Format:** 64-character hexadecimal string (0-9, a-f, A-F)
-- Example: `1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef`
-
-**Npub Format:** Bech32-encoded public key starting with `npub1`
-- Example: `npub1zg69v7ys40x77y352eufp27daufrg4ncjz4ummcjx3t83y9tehhsqepuh0`
-
-Both formats are accepted for add/remove operations and are interchangeable. The system stores pubkeys internally in hex format for consistency.
 
 ### Command Line Options
 
@@ -127,8 +99,7 @@ dart run bin/blossomd.dart --help
 # Show version
 dart run bin/blossomd.dart --version
 
-# Show whitelist help
-dart run bin/blossomd.dart whitelist --help
+Authorization is handled by the external relay endpoint. No local whitelist commands.
 ```
 
 ## API Endpoints
@@ -214,7 +185,7 @@ Authorization: Nostr <base64-encoded-event>
 
 ## Database Management
 
-The server uses SQLite for storing whitelist information. The database is automatically created at `<WORKING_DIR>/database.sqlite`.
+The server uses SQLite for storing blob ownership information. The database is automatically created at `<WORKING_DIR>/database.sqlite`.
 
 ### Manual Database Access
 
@@ -284,23 +255,8 @@ PORT=8080
 SERVER_URL=https://blossom.example.com
 ```
 
-### Whitelist Management Examples
-```bash
-# Add a user to whitelist using hex format
-dart run bin/blossomd.dart whitelist add abc123def456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef
-
-# Add another user using npub format
-dart run bin/blossomd.dart whitelist add npub1zg69v7ys40x77y352eufp27daufrg4ncjz4ummcjx3t83y9tehhsqepuh0
-
-# List all users (shows both hex and npub formats)
-dart run bin/blossomd.dart whitelist list
-
-# Remove user using hex format
-dart run bin/blossomd.dart whitelist remove abc123def456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef
-
-# Remove user using npub format
-dart run bin/blossomd.dart whitelist remove npub1zg69v7ys40x77y352eufp27daufrg4ncjz4ummcjx3t83y9tehhsqepuh0
-```
+### Notes
+- Server converts hex pubkeys to npub when querying the relay.
 
 ## Security Considerations
 

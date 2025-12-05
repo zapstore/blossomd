@@ -20,11 +20,7 @@ void main(List<String> arguments) async {
 
     final config = BlossomConfig.fromEnvironment();
 
-    // Handle whitelist commands
-    if (results.rest.isNotEmpty && results.rest[0] == 'whitelist') {
-      handleWhitelistCommand(results.rest.skip(1).toList(), config);
-      return;
-    }
+    // Whitelist commands removed; external authorization is used now
 
     // Default: start the server
     final server = BlossomServer(config);
