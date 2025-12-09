@@ -51,8 +51,6 @@ class BlossomServer {
     router.get('/<sha256|[a-fA-F0-9]{64}>.<ext>', _handleGetBlobWithExt);
     router.head('/<sha256|[a-fA-F0-9]{64}>', _handleHeadBlob);
     router.head('/<sha256|[a-fA-F0-9]{64}>.<ext>', _handleHeadBlobWithExt);
-    router.get('/file/<filename>', _handleGetFile);
-    router.head('/file/<filename>', _handleHeadFile);
 
     // Upload endpoints
     router.put('/upload', _handleUpload);
@@ -63,6 +61,10 @@ class BlossomServer {
 
     // Delete endpoint
     router.delete('/<sha256>', _handleDeleteBlob);
+
+    // Fallback name-based GET/HEAD: resolved when not matching sha256
+    router.get('/<name>', _handleGetByNameOrHash);
+    router.head('/<name>', _handleHeadByNameOrHash);
 
     print('[INFO] Routes configured');
   }
@@ -183,6 +185,10 @@ class BlossomServer {
     if (name.isEmpty || name.length > 255) return false;
     if (name.contains('/') || name.contains('\\')) return false;
     return true;
+  }
+
+  bool _isHash(String value) {
+    return RegExp(r'^[a-fA-F0-9]{64}$').hasMatch(value);
   }
 
   // removed unused _storeBlobFile
@@ -314,15 +320,21 @@ class BlossomServer {
     return _serveBlob(sha256, headOnly: true);
   }
 
-  // Handlers for /file/<filename>
-  Future<Response> _handleGetFile(Request request) async {
-    final filename = request.params['filename']!;
-    return _serveBlobByName(filename, headOnly: false);
+  // Handlers for /<name>: decide hash vs filename
+  Future<Response> _handleGetByNameOrHash(Request request) async {
+    final name = request.params['name']!;
+    if (_isHash(name)) {
+      return _serveBlob(name, headOnly: false);
+    }
+    return _serveBlobByName(name, headOnly: false);
   }
 
-  Future<Response> _handleHeadFile(Request request) async {
-    final filename = request.params['filename']!;
-    return _serveBlobByName(filename, headOnly: true);
+  Future<Response> _handleHeadByNameOrHash(Request request) async {
+    final name = request.params['name']!;
+    if (_isHash(name)) {
+      return _serveBlob(name, headOnly: true);
+    }
+    return _serveBlobByName(name, headOnly: true);
   }
 
   // Helper to stream upload to disk and calculate hash as we go
