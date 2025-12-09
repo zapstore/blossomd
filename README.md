@@ -60,6 +60,10 @@ Configure the server using a `.env` file or environment variables:
 - `WORKING_DIR`: Base directory for data storage (default: `./data`)
 - `PORT`: HTTP server port (default: `3334`)
 - `SERVER_URL`: Public server URL (default: `http://localhost:<PORT>`)
+- `DISABLE_RELAY_CHECK`: Skip external relay authorization (useful for local
+  development and tests). Defaults to `false`.
+- `ALLOWED_PUBKEYS`: Comma-separated list of pubkeys (hex or npub) to allow
+  when relay checks are disabled. Others are rejected.
 
 The server loads configuration in this order:
 1. Values from `.env` file (if it exists)

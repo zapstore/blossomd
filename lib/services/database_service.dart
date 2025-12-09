@@ -10,8 +10,6 @@ class DatabaseService {
 
     final db = sqlite3.open(dbPath);
 
-    // Whitelist table removed - external authorization is used now
-
     // Create blob ownership table to track file-pubkey associations
     db.execute('''
       CREATE TABLE IF NOT EXISTS blobs (
@@ -24,7 +22,33 @@ class DatabaseService {
       )
     ''');
 
+    // Ensure filename column exists for name-based lookup
+    _ensureFilenameColumn(db);
+
+    // Unique index on filename (allows multiple NULLs) for global name→hash mapping
+    db.execute('''
+      CREATE UNIQUE INDEX IF NOT EXISTS idx_blobs_filename
+      ON blobs(filename)
+      WHERE filename IS NOT NULL
+    ''');
+
+    // Track download counts per unique hash
+    db.execute('''
+      CREATE TABLE IF NOT EXISTS blob_downloads (
+        sha256 text PRIMARY KEY,
+        downloads integer NOT NULL DEFAULT 0
+      )
+    ''');
+
     print('[INFO] Database initialized at $dbPath');
     return db;
+  }
+
+  static void _ensureFilenameColumn(Database db) {
+    final pragma = db.select('PRAGMA table_info(blobs);');
+    final hasFilename = pragma.any((row) => row['name'] == 'filename');
+    if (!hasFilename) {
+      db.execute('ALTER TABLE blobs ADD COLUMN filename text');
+    }
   }
 }

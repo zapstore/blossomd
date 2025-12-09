@@ -34,6 +34,8 @@ void main() {
           'WORKING_DIR': testWorkingDir,
           'PORT': '3335',
           'SERVER_URL': baseUrl,
+          'DISABLE_RELAY_CHECK': 'true',
+          'ALLOWED_PUBKEYS': testPublicKey,
         },
       );
 

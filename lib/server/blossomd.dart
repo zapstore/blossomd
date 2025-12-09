@@ -1,6 +1,5 @@
 import 'dart:convert';
 import 'dart:io';
-import 'dart:typed_data';
 import 'package:shelf/shelf.dart';
 import 'package:shelf/shelf_io.dart' as shelf_io;
 import 'package:shelf_router/shelf_router.dart';
@@ -52,6 +51,8 @@ class BlossomServer {
     router.get('/<sha256|[a-fA-F0-9]{64}>.<ext>', _handleGetBlobWithExt);
     router.head('/<sha256|[a-fA-F0-9]{64}>', _handleHeadBlob);
     router.head('/<sha256|[a-fA-F0-9]{64}>.<ext>', _handleHeadBlobWithExt);
+    router.get('/file/<filename>', _handleGetFile);
+    router.head('/file/<filename>', _handleHeadFile);
 
     // Upload endpoints
     router.put('/upload', _handleUpload);
@@ -121,18 +122,36 @@ class BlossomServer {
 
   // External authorization via Zapstore relay
   Future<bool> _isAcceptedByRelay(String pubkey) async {
+    final normalizedPubkey = PubkeyUtils.normalizePubkey(pubkey);
+    if (normalizedPubkey == null) {
+      return false;
+    }
+
+    if (config.allowedPubkeys.isNotEmpty) {
+      final normalizedAllowed = config.allowedPubkeys
+          .map(PubkeyUtils.normalizePubkey)
+          .whereType<String>()
+          .toSet();
+      if (normalizedAllowed.contains(normalizedPubkey)) {
+        return true;
+      }
+
+      // When relay check is disabled but an allowlist is present, treat
+      // non-listed keys as rejected to keep negative paths testable.
+      if (config.disableRelayCheck) {
+        return false;
+      }
+    }
+
+    if (config.disableRelayCheck) {
+      return true;
+    }
+
     try {
       // Ensure npub format for the API
-      String npub;
-      if (pubkey.startsWith('npub1')) {
-        npub = pubkey;
-      } else {
-        final normalizedHex = PubkeyUtils.normalizePubkey(pubkey);
-        if (normalizedHex == null) {
-          return false;
-        }
-        npub = PubkeyUtils.hexToNpub(normalizedHex);
-      }
+      final npub = pubkey.startsWith('npub1')
+          ? pubkey
+          : PubkeyUtils.hexToNpub(normalizedPubkey);
 
       final uri = Uri.parse(
         'https://relay.zapstore.dev/api/v1/accept',
@@ -160,10 +179,20 @@ class BlossomServer {
     return path.join(blobsDir, sha256);
   }
 
+  bool _isValidFilename(String name) {
+    if (name.isEmpty || name.length > 255) return false;
+    if (name.contains('/') || name.contains('\\')) return false;
+    return true;
+  }
+
   // removed unused _storeBlobFile
 
   // Unified blob response logic
-  Future<Response> _serveBlob(String sha256, {bool headOnly = false}) async {
+  Future<Response> _serveBlob(
+    String sha256, {
+    bool headOnly = false,
+    String? downloadName,
+  }) async {
     // Validate SHA-256 format
     if (!RegExp(r'^[a-fA-F0-9]{64}').hasMatch(sha256)) {
       return Response.notFound('Invalid hash format');
@@ -191,24 +220,72 @@ class BlossomServer {
     }
     final safeContentType = contentType ?? 'application/octet-stream';
 
+    final baseHeaders = <String, String>{
+      'content-type': safeContentType,
+      if (downloadName != null)
+        'content-disposition': 'attachment; filename="$downloadName"',
+    };
+
     if (headOnly) {
       final size = file.lengthSync();
       return Response.ok(
         null,
         headers: {
-          'content-type': safeContentType,
+          ...baseHeaders,
           'content-length': size.toString(),
         },
       );
     } else {
+      await _incrementDownloadCount(sha256.toLowerCase());
       final data = file.readAsBytesSync();
       return Response.ok(
         data,
         headers: {
-          'content-type': safeContentType,
+          ...baseHeaders,
           'content-length': data.length.toString(),
         },
       );
+    }
+  }
+
+  Future<void> _incrementDownloadCount(String sha256) async {
+    try {
+      final stmt = db.prepare('''
+        INSERT INTO blob_downloads (sha256, downloads)
+        VALUES (?, 1)
+        ON CONFLICT(sha256) DO UPDATE SET downloads = downloads + 1
+      ''');
+      stmt.execute([sha256]);
+    } catch (e) {
+      print('[WARNING] Failed to increment download count for $sha256: $e');
+    }
+  }
+
+  Future<Response> _serveBlobByName(
+    String filename, {
+    bool headOnly = false,
+  }) async {
+    if (!_isValidFilename(filename)) {
+      return Response(400, body: 'Invalid filename');
+    }
+
+    try {
+      final result = db.select(
+        'SELECT sha256 FROM blobs WHERE filename = ? LIMIT 1',
+        [filename],
+      );
+      if (result.isEmpty) {
+        return Response.notFound('File not found');
+      }
+      final sha256 = (result.first['sha256'] as String).toLowerCase();
+      return _serveBlob(
+        sha256,
+        headOnly: headOnly,
+        downloadName: filename,
+      );
+    } catch (e) {
+      print('[ERROR] Filename lookup failed: $e');
+      return Response.internalServerError();
     }
   }
 
@@ -235,6 +312,17 @@ class BlossomServer {
   Future<Response> _handleHeadBlobWithExt(Request request) async {
     final sha256 = request.params['sha256']!;
     return _serveBlob(sha256, headOnly: true);
+  }
+
+  // Handlers for /file/<filename>
+  Future<Response> _handleGetFile(Request request) async {
+    final filename = request.params['filename']!;
+    return _serveBlobByName(filename, headOnly: false);
+  }
+
+  Future<Response> _handleHeadFile(Request request) async {
+    final filename = request.params['filename']!;
+    return _serveBlobByName(filename, headOnly: true);
   }
 
   // Helper to stream upload to disk and calculate hash as we go
@@ -513,29 +601,8 @@ class BlossomServer {
     }
   }
 
-  // Logging middleware
-  Handler _logRequests(Handler innerHandler) {
-    return (Request request) async {
-      final start = DateTime.now();
-      print(
-        '[${start.toIso8601String()}] ${request.method} ${request.requestedUri}',
-      );
-
-      final response = await innerHandler(request);
-
-      final duration = DateTime.now().difference(start);
-      print(
-        '[${DateTime.now().toIso8601String()}] ${response.statusCode} ${request.method} ${request.requestedUri} (${duration.inMilliseconds}ms)',
-      );
-
-      return response;
-    };
-  }
-
   Future<void> start() async {
-    final handler = Pipeline()
-        .addMiddleware(_logRequests)
-        .addHandler(router.call);
+    final handler = Pipeline().addHandler(router.call);
 
     final server = await shelf_io.serve(
       handler,
